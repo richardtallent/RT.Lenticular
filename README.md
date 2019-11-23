@@ -18,3 +18,5 @@ Use `dotnet run` to execute the application. Optional parameters can be used to 
 This will generate a PNG file with a bar of lines for each test, where the lines are spaced to create the test pattern. There are sites online explaining how to use these test sheets, so I won't belabor that, other than to mention that it's important that you _do not scale_ the graphic when you print it -- it must be printed at exactly the dimensions you selected. PhotoShop makes this easy, just select "Center," and before you print, use the Canvas Size to match the DPI there to the DPI used to generate the file.
 
 So far, this is only designed to create test patterns for stereographs (two images per lenticule). It could be expanded for other purposes, but I wanted to get this part right before refactoring it for more frames.
+
+Assuming I can get these prints actually working, I'll probably also enhance this application to do my interlacing for me, using high-resolution source files. If you're looking for a free app for this, please feel free to jump in and help make that part happen.
