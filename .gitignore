@@ -1,0 +1,4 @@
+/bin
+/obj
+*.png
+.DS_STORE
