@@ -11,50 +11,52 @@ using SixLabors.Shapes;
 namespace RT.Lenticular {
 	class Program {
 		static void Main(string[] args) {
-			var c = new Calibration()
-			{
-				WidthInches = getIntArg(args, 0, 8),
-				HeightInches = getIntArg(args, 1, 8),
-				DPI = getIntArg(args, 2, 600),
-				LPI = getIntArg(args, 3, 60),
-				StepCentiLPI = getIntArg(args, 4, 100),
-				NumSteps = getIntArg(args, 5, 10)
+			var widthInches = getIntArg(args, 0, 8);
+			var heightInches = getIntArg(args, 1, 8);
+			var dpi = getIntArg(args, 2, 600);
+			var lpi = getIntArg(args, 3, 60);
+			var stepLPTI = getIntArg(args, 4, 100);     // default 1/10th of a line per inch per row
+			var numSteps = getIntArg(args, 5, 10);      // number of variations on each side of LPI
+			var frameCount = getIntArg(args, 6, 2);     // number of frames
+			var rowHeightPx = heightInches * dpi / (numSteps * 2 + 1);
+			var fontSizePx = rowHeightPx / 2;
+			var textWidthInches = 1;                    // Bit of a hack, should be based on font size
+			var usedWidthInches = widthInches - textWidthInches;
+			var font = SixLabors.Fonts.SystemFonts.CreateFont("Arial", rowHeightPx / 2);
+			var colors = new[] {
+				Rgba32.Black, Rgba32.White,
+				Rgba32.Red, Rgba32.Green, Rgba32.Blue,
+				Rgba32.Yellow, Rgba32.Teal, Rgba32.Purple,
+				Rgba32.Orange, Rgba32.Turquoise, Rgba32.Violet
 			};
-			Console.WriteLine($"{c.WidthInches} {c.HeightInches} {c.DPI} {c.LPI} {c.StepCentiLPI} {c.NumSteps}");
-			Console.WriteLine("Creating image");
-			using (var img = new Image<Rgba32>(null, c.WidthInches * c.DPI, c.HeightInches * c.DPI, Rgba32.White)) {
-				// Height in pixels of each block of lines
-				var lines = new List<int[]>();
-				var h = c.HeightInches * c.DPI / (c.NumSteps * 2 + 1);
-				var marginInches = 0.5f;
-				var font = SixLabors.Fonts.SystemFonts.CreateFont("Arial", h / 2, FontStyle.Regular);
-				//var fontBrush = new SolidBrush(Color.Black);
-				for (var i = -c.NumSteps; i <= c.NumSteps; i++) {
-					float thisCentiLPI = c.LPI * 100f + (i * c.StepCentiLPI);
-					var pixelsPerLine = (int)Math.Round(c.DPI / (thisCentiLPI / 100));
-					var p = new Pen(Color.Black, (float)pixelsPerLine);
-					var numLines = (c.WidthInches - marginInches) * c.DPI / 2 / pixelsPerLine;
-					var y = (i + c.NumSteps) * h;
-					Console.WriteLine($"Step: {pixelsPerLine} {numLines} {y}");
+			Console.WriteLine($"{widthInches}x{heightInches}, {dpi} DPI, {lpi} LPI, {stepLPTI} LPTI/step, {numSteps} steps, {frameCount} frames");
+			// Starting position for the row
+			var y = 0;
+			// Lines per thousand inches for this step
+			var lpti = lpi * 1000 + (-numSteps * stepLPTI);
+			// Height of the actual stripe, leaving a gutter between rows
+			var lineHeight = (int)((float)rowHeightPx * .8);
+			Console.WriteLine($"{lpti}, {lineHeight}, {fontSizePx}, {textWidthInches}");
+			using (var img = new Image<Rgba32>(null, widthInches * dpi, heightInches * dpi, Rgba32.White)) {
+				for (var i = -numSteps; i <= numSteps; i++) {
+					// Label the row, centering the text vertically
 					img.Mutate(ctx => ctx.DrawText(
-						$"{thisCentiLPI / 100}",
+						$"  {(float)lpti / 1000f}",
 						font,
 						Rgba32.Black,
-						new PointF(marginInches * c.DPI / 10, y + h / 5)
+						new PointF(0, y + (rowHeightPx - fontSizePx) / 2)
 					));
-					//img.DrawString($" Fooooo", font, fontBrush, new Point(c.DPI / 15, y + h / 10));
-					for (var j = 0; j < numLines; j++) {
-						var x = j * pixelsPerLine * 2 + (int)(marginInches * c.DPI);
-						var lh = (int)((float)h * .8);
-						//Console.WriteLine($"Line: {i} {j} {h} {x} {y} {y + lh}");
-						img.Mutate(ctx => ctx.DrawLines(
+					// Draw the stripes
+					foreach (var l in LenticuleMaker.Lenticules(usedWidthInches, dpi, lpti, frameCount)) {
+						img.Mutate(ctx => ctx.Fill(
 							new GraphicsOptions(false),
-							Rgba32.Black,
-							pixelsPerLine,
-							new PointF(x, y),
-							new PointF(x, y + lh)
+							colors[l.Frame - 1],
+							new SixLabors.Primitives.Rectangle(l.Left + textWidthInches * dpi, y, l.Right - l.Left, lineHeight)
 						));
 					}
+					// Increment for the next step
+					y += rowHeightPx;
+					lpti += stepLPTI;
 				}
 				img.Save("test.png");
 			}
@@ -65,13 +67,44 @@ namespace RT.Lenticular {
 
 	}
 
-	class Calibration {
-		public int WidthInches { get; set; } = 8;
-		public int HeightInches { get; set; } = 8;
-		public int DPI { get; set; } = 600;
-		public int LPI { get; set; } = 60;
-		public int StepCentiLPI { get; set; } = 10;    // 100ths of line per inch to increment test
-		public int NumSteps { get; set; } = 4;          // On either side of the nominal side
+	// Stripe
+	struct Lenticule {
+		public int Left { get; set; }
+		public int Right { get; set; }
+		public int Frame { get; set; }
+	}
+
+	// Given a width, height, DPI, MLPI, and frame count, emits a series of points containing the
+	// rectangles to be drawn (in pixels) and the frame number to draw them from. Math is done in
+	// 100,000ths of an inch and returned in whole pixels. LPTI = lines per *thousand* inches
+	// (avoids the need for floating point math).
+	static class LenticuleMaker {
+
+		public static IEnumerable<Lenticule> Lenticules(
+			int WidthInches,
+			int DPI,
+			int LPTI,
+			int FrameCount
+		) {
+			const int hundredk = 100000;
+			var width = WidthInches * DPI * hundredk;
+			var left = 0;
+			var right = 0;
+			var frameIndex = 0;
+			var milliPixelsPerLine = DPI * hundredk / FrameCount / LPTI * 1000;
+			while (right < width) {
+				right += milliPixelsPerLine;
+				frameIndex++;
+				yield return new Lenticule()
+				{
+					Left = left / hundredk,
+					Right = (right % width) / hundredk,
+					Frame = frameIndex % FrameCount + 1
+				};
+				left = right;
+			}
+		}
+
 	}
 
 }
